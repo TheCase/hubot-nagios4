@@ -64,7 +64,7 @@ nagios notifications_on - enable global notifications
         msg.send "I didn't find any services for a host named '#{host}'"
       else
         service_parse html, (res) -> 
-          res = "nagios status for host '#{host}':\n" + res
+          res = "nagios status for host '#{host}': #{nagios_url}/status.cgi?host=#{host}\n" + res
           msg.send res
 
   robot.respond /nagios ack (.*):(.*) (.*)/i, (msg) ->
@@ -188,16 +188,16 @@ service_parse = (html, cb) ->
 
   results = (Select handler.dom, "td")
   output = ""
-  mark = 0
   for item in results
     if item['attribs'] && item['attribs']['class'] && item['attribs']['class'].match(/^status/)
       for child in item['children']
         if child['raw'].match(/&service=/)
-          output += child['children'][0]['raw'] + " "
+          output += "`"+child['children'][0]['raw'] + "` "
+        if child['raw'].match(/^(OK|WARNING|CRITICAL|UNKNOWN)$/)
+          output += "*"+child['raw'] + "* "
           mark = 0
-        if mark in [ 2, 4 ]
-          output += child['raw'] + " "
-        if mark == 6
-          output += "\"" + entities.decode(child['raw']) + "\"\n"
+        switch mark
+          when 2 then output += "`"+child['raw'] + "` "
+          when 4 then output += "\"" + entities.decode(child['raw']) + "\"\n"
     mark += 1
   cb output
