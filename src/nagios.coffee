@@ -64,26 +64,39 @@ module.exports = (robot) ->
       cmd = input.shift()
      
     switch cmd 
+
       when 'host'
         if input.length < 1 
           msg.send "Usage: nagios #{cmd} <host> [<service>]"
         else
           host = input[0]
-          service = input[1]
+          service = input[1] || ".*"
           call = "status.cgi"
           data = "host=#{host}&limit=0"
+          info = "#{safe_url}/#{call}#{data}"
           nagios_post msg, call, data, (html) ->
             if html.match(/of 0 Matching Services/)
               msg.send "I didn't find any services for a host named '#{host}'"
             else
-              host_service_parse html, (res) -> 
-                if service
-                  lines = res.split("\n")
-                  for line in lines
-                    if line.match(service)
-                      res = line
-                res = "nagios status for host '#{host}': #{safe_url}/status.cgi?host=#{host}\n" + res
+              host_service_parse html, service, (res) -> 
+                res = "nagios status for host '#{host}': #{info}\n" + res
                 msg.send res
+
+      when 'hosts'
+        if input.length < 1 || !input[0].match(/(up|down|unreachable)/i)
+          msg.send "Usage: nagios #{cmd} <up|down|unreachable>"
+        else
+          status = (input[0] || ".*").toUpperCase()
+          call = "status.cgi"
+          data = "hostgroup=all&style=hostdetail&limit=0"
+          info = "#{safe_url}/#{call}#{data}"
+          nagios_post msg, call, data, (html) ->
+              host_parse html, status, (res) -> 
+                if res.length > 0
+                  res = "#{status} hosts: #{info}\n" + res
+                  msg.send res
+                else
+                  msg.send "I did not find any hosts in '#{status}' state"
 
       when 'ack'
         if input.length < 1 
@@ -192,8 +205,8 @@ module.exports = (robot) ->
       when 'help'
         msg.send """
 nagios help:
-nagios hosts [<down|up|unreachable>] - view problem hosts
-nagios services [<ok|critical|warning|unknown>] - view unhandled service issues
+nagios hosts <up|down|unreachable> - view problem hosts
+nagios services [<critical|warning|unknown>] - view unhandled service issues
 nagios host <host> [<service>]- view host service status
 nagios check <host> [<service>] - force check of all services on host (service optional)
 nagios ack <host> [<service>] - acknowledge host or host service
@@ -203,14 +216,14 @@ nagios downtime <host> <service> [<minutes>] - delay the next service notificati
 nagios notifications <on|off> - disables global notifications
 """
 
-nagios_post = (msg, call, data, cb) ->
+nagios_post = (msg, call, post, cb) ->
   msg.http("#{nagios_url}/#{call}")
     .header('accept', '*/*')
     .header('User-Agent', "Hubot/#{@version}")
-    .post(data) (err, res, body) ->
+    .post(post) (err, res, body) ->
       cb body
 
-host_service_parse = (html, cb) ->
+host_service_parse = (html, match, cb) ->
   entities = new Entities()
   handler = new HtmlParser.DefaultHandler()
   parser  = new HtmlParser.Parser handler
@@ -222,12 +235,38 @@ host_service_parse = (html, cb) ->
     if item['attribs'] && item['attribs']['class'] && item['attribs']['class'].match(/^status/)
       for child in item['children']
         if child['raw'].match(/&service=/)
-          output += "`"+child['children'][0]['raw'] + "` "
+          service = child['children'][0]['raw']
+          buffer  = "`#{service}` "
         if child['raw'].match(/^(OK|WARNING|CRITICAL|UNKNOWN)$/)
-          output += "*"+child['raw'] + "* "
+          buffer += "*#{child['raw']}* "
           mark = 0
         switch mark
-          when 2 then output += "`"+child['raw'] + "` "
-          when 4 then output += "\"" + entities.decode(child['raw']) + "\"\n"
+          when 2, 3 then buffer += "`"+child['raw'] + "` "
+          when 4 
+            buffer += "\"" + entities.decode(child['raw']) + "\"\n"
+            if service.match(match) then output += buffer
+    mark += 1
+  cb output
+
+host_parse = (html, match, cb) ->
+  entities = new Entities()
+  handler = new HtmlParser.DefaultHandler()
+  parser  = new HtmlParser.Parser handler
+  parser.parseComplete html
+
+  results = (Select handler.dom, "td")
+  output = ""
+  for item in results
+    if item['attribs'] && item['attribs']['class'] && item['attribs']['class'].match(/^status/)
+      for child in item['children']
+        if child['raw'].match(/&host=/)
+          buffer = "`"+child['children'][0]['raw'] + "` "
+        if child['raw'].match(/^(UP|DOWN|UNREACHABLE)$/)
+          status = child['raw']
+          buffer += "*#{status}* "
+          mark = 0
+        if mark == 2
+            buffer += "`"+child['raw'] + "`\n"
+            if status.match(match) then output += buffer
     mark += 1
   cb output
