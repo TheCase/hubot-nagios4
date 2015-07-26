@@ -20,6 +20,9 @@ Entities    = require('html-entities').AllHtmlEntities;
 
 nagios_url = process.env.HUBOT_NAGIOS_URL
 
+# remove authentication for using URL inline
+safe_url = nagios_url.replace /\/\/(.*):(.*)@/, "//"
+
 # for browser request for bad https
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
 
@@ -64,7 +67,7 @@ nagios notifications_on - enable global notifications
         msg.send "I didn't find any services for a host named '#{host}'"
       else
         service_parse html, (res) -> 
-          res = "nagios status for host '#{host}': #{nagios_url}/status.cgi?host=#{host}\n" + res
+          res = "nagios status for host '#{host}': #{safe_url}/status.cgi?host=#{host}\n" + res
           msg.send res
 
   robot.respond /nagios ack (.*):(.*) (.*)/i, (msg) ->
