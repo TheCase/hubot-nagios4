@@ -1,12 +1,17 @@
 # Description:
 #   This script receives pages in the formats
-#        /usr/bin/curl -d host="$HOSTALIAS$" -d output="$SERVICEOUTPUT$" -d description="$SERVICEDESC$" -d type=service -d notificationtype="$NOTIFICATIONTYPE$ -d state="$SERVICESTATE$" $CONTACTADDRESS1$
-#        /usr/bin/curl -d host="$HOSTNAME$" -d output="$HOSTOUTPUT$" -d type=host -d notificationtype="$NOTIFICATIONTYPE$" -d state="$HOSTSTATE$" $CONTACTADDRESS1$
+#        /usr/bin/curl -d host="$HOSTALIAS$" -d output="$SERVICEOUTPUT$" -d description="$SERVICEDESC$" -d type=service -d notificationtype="$NOTIFICATIONTYPE$ -d state="$SERVICESTATE$" $CONTACTPAGER$
+#        /usr/bin/curl -d host="$HOSTNAME$" -d output="$HOSTOUTPUT$" -d type=host -d notificationtype="$NOTIFICATIONTYPE$" -d state="$HOSTSTATE$" $CONTACTPAGER$
 #
-#   Based on a gist by oremj (https://gist.github.com/oremj/3702073)
+#   Example contact pager attribute is like the following:
+#     http://<hubot_host>:8080/hubot/nagios/<room_name>
+#
+#   Based on a gist by bentwr (https://gist.github.com/benwtr/5691225) 
+#   which is from a gist by oremj (https://gist.github.com/oremj/3702073)
 #
 # Configuration:
-#   HUBOT_NAGIOS_URL - https://<user>:<password>@nagios.example.com/cgi-bin/nagios3
+#   HUBOT_NAGIOS_AUTH - <username>:<password>
+#   HUBOT_NAGIOS_URL  - https://nagios.example.com/nagios/cgi-bin
 #
 # Commands:
 #   hubot help - display the help text
@@ -18,13 +23,17 @@ HtmlParser  = require 'htmlparser'
 JSDom       = require 'jsdom'
 Entities    = require('html-entities').AllHtmlEntities;
 
-nagios_url = process.env.HUBOT_NAGIOS_URL
-
-# remove authentication for using URL inline
-safe_url = nagios_url.replace /\/\/(.*):(.*)@/, "//"
-
 # for browser request for bad https
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+
+# construct various URLs
+nagios_url  = process.env.HUBOT_NAGIOS_URL
+nagios_auth = process.env.HUBOT_NAGIOS_AUTH
+url_method  = nagios_url.match(/(https|http):\/\//)[1]
+pattern     = "#{url_method}://"
+base_url    = nagios_url.replace(pattern,"")
+nagios_url  = "#{url_method}://#{nagios_auth}@#{base_url}"
+safe_url    = "#{url_method}://#{base_url}"
 
 module.exports = (robot) ->
 
@@ -53,34 +62,26 @@ module.exports = (robot) ->
     else
       input.shift()
       cmd = input.shift()
-   
-    switch cmd 
-      when 'help'
-        msg.send """
-nagios help:
-nagios hosts <down|up|unreachable> - view problem hosts
-nagios services <ok|critical|warning|unknown> - view unhandled service issues
-nagios host <host> - view host service status
-nagios check <host> [<service>] - force check of all services on host (service optional)
-nagios ack <host> [<service>] - acknowledge host or host service
-nagios enable <host> [<service>] - (en|dis)able notifications on host (service optional)
-nagios disable <host> [<service>] - disable notifications on host (service optional)
-nagios downtime <host> <service> [<minutes>] - delay the next service notification
-nagios notifications <on|off> - disables global notifications
-"""
      
+    switch cmd 
       when 'host'
         if input.length < 1 
-          msg.send "Usage: nagios #{cmd} <host>"
+          msg.send "Usage: nagios #{cmd} <host> [<service>]"
         else
           host = input[0]
+          service = input[1]
           call = "status.cgi"
           data = "host=#{host}&limit=0"
           nagios_post msg, call, data, (html) ->
             if html.match(/of 0 Matching Services/)
               msg.send "I didn't find any services for a host named '#{host}'"
             else
-              service_parse html, (res) -> 
+              host_service_parse html, (res) -> 
+                if service
+                  lines = res.split("\n")
+                  for line in lines
+                    if line.match(service)
+                      res = line
                 res = "nagios status for host '#{host}': #{safe_url}/status.cgi?host=#{host}\n" + res
                 msg.send res
 
@@ -188,6 +189,19 @@ nagios notifications <on|off> - disables global notifications
           if res.match(/successfully submitted/)
             msg.send "Ok, global notifications #{state}"
 
+      when 'help'
+        msg.send """
+nagios help:
+nagios hosts [<down|up|unreachable>] - view problem hosts
+nagios services [<ok|critical|warning|unknown>] - view unhandled service issues
+nagios host <host> [<service>]- view host service status
+nagios check <host> [<service>] - force check of all services on host (service optional)
+nagios ack <host> [<service>] - acknowledge host or host service
+nagios enable <host> [<service>] - (en|dis)able notifications on host (service optional)
+nagios disable <host> [<service>] - disable notifications on host (service optional)
+nagios downtime <host> <service> [<minutes>] - delay the next service notification
+nagios notifications <on|off> - disables global notifications
+"""
 
 nagios_post = (msg, call, data, cb) ->
   msg.http("#{nagios_url}/#{call}")
@@ -196,7 +210,7 @@ nagios_post = (msg, call, data, cb) ->
     .post(data) (err, res, body) ->
       cb body
 
-service_parse = (html, cb) ->
+host_service_parse = (html, cb) ->
   entities = new Entities()
   handler = new HtmlParser.DefaultHandler()
   parser  = new HtmlParser.Parser handler
