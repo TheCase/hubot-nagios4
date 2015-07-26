@@ -1,0 +1,30 @@
+{
+    "name": "hubot-nagios4",
+    "version": "1.0.0",
+
+    "description": "hubot script that interacts with nagios4",
+    "keywords": [ "hubot", "hubot-scripts", "nagios" ],
+
+    "author": "Bryan Casey (http://github.com/TheCase/)",
+
+    "license": "MIT",
+
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/TheCase/hubot-nagios4.git"
+    },
+    "homepage": "https://github.com/TheCase/hubot-nagios4",
+    "bugs": "https://github.com/TheCase/hubot-nagios4/issues",
+
+    "dependencies": {
+        "coffee-script": "~1.6",
+        "moment":        "~2.10.3",
+        "soupselect":    "~0.2.0",
+        "htmlparser":    "~1.7.7",
+        "jsdom":         "~3.1.2",
+        "html-entities": "~1.1.3"
+    },
+
+    "main": "./index.coffee"
+
+}
