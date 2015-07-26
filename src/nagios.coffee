@@ -44,137 +44,150 @@ module.exports = (robot) ->
     res.writeHead 204, { 'Content-Length': 0 }
     res.end()
 
-  robot.respond /nagios help/i, (msg) ->
-    msg.send """
-nagios hosts <down|unreachable> - view problem hosts
-nagios services <critical|warning|unknown> - view unhandled service issues
-nagios host <host> - view host status
-nagios ack <host>:<service> <comment> - acknowledge alert
-nagios downtime <host>:<service> <minutes> - delay the next service notification
-nagios check <host>(:<service>) - force check of all services on host (service optional)
-nagios enable <host>(:<service>) - enable notifications on host (or specific service optional)
-nagios disable <host>(:<service>) - disable notifications on host (or specific service optional)
-nagios notifications_off - disables global notifications
-nagios notifications_on - enable global notifications
+  robot.respond /nagios(NULL|(.*))/i, (msg) ->
+    hubot_user = msg['message']['user']['email_address']
+    words = msg.match[1]
+    input = words.split(' ');
+    if words.length < 1
+      cmd = 'help' 
+    else
+      input.shift()
+      cmd = input.shift()
+   
+    switch cmd 
+      when 'help'
+        msg.send """
+nagios help:
+nagios hosts <down|up|unreachable> - view problem hosts
+nagios services <ok|critical|warning|unknown> - view unhandled service issues
+nagios host <host> - view host service status
+nagios check <host> [<service>] - force check of all services on host (service optional)
+nagios ack <host> [<service>] - acknowledge host or host service
+nagios enable <host> [<service>] - (en|dis)able notifications on host (service optional)
+nagios disable <host> [<service>] - disable notifications on host (service optional)
+nagios downtime <host> <service> [<minutes>] - delay the next service notification
+nagios notifications <on|off> - disables global notifications
 """
+     
+      when 'host'
+        if input.length < 1 
+          msg.send "Usage: nagios #{cmd} <host>"
+        else
+          host = input[0]
+          call = "status.cgi"
+          data = "host=#{host}&limit=0"
+          nagios_post msg, call, data, (html) ->
+            if html.match(/of 0 Matching Services/)
+              msg.send "I didn't find any services for a host named '#{host}'"
+            else
+              service_parse html, (res) -> 
+                res = "nagios status for host '#{host}': #{safe_url}/status.cgi?host=#{host}\n" + res
+                msg.send res
 
-  robot.respond /nagios host (.*)/i, (msg) ->
-    host = msg.match[1]
-    call = "status.cgi"
-    data = "host=#{host}&limit=0"
-    nagios_post msg, call, data, (html) ->
-      if html.match(/of 0 Matching Services/)
-        msg.send "I didn't find any services for a host named '#{host}'"
-      else
-        service_parse html, (res) -> 
-          res = "nagios status for host '#{host}': #{safe_url}/status.cgi?host=#{host}\n" + res
-          msg.send res
+      when 'ack'
+        if input.length < 1 
+          msg.send "Usage: nagios #{cmd} <host> [<service>]"
+        else
+           host = input[0]
+           service = input[1]
+           if service 
+              ct = 34
+              service = "&service=#{service}"
+           else
+              ct = 33
+              service = ""
+           comment = "hubot initiated ack for #{hubot_user}"
+           call = "cmd.cgi"
+           data = "cmd_typ=#{ct}&host=#{host}#{service}&cmd_mod=2&sticky_ack=on&com_author=#{encodeURIComponent(hubot_user)}&send_notification=on&com_data=#{encodeURIComponent(comment)}"
+           nagios_post msg, call, data, (res) ->
+             if res.match(/successfully submitted/)
+               msg.send "Your acknowledgement was received by nagios"
+             else 
+               msg.send "that didn't work.  Maybe a typo?"
 
-  robot.respond /nagios ack (.*):(.*) (.*)/i, (msg) ->
-    host = msg.match[1]
-    service = msg.match[2]
-    comment = msg.match[3] || ""
-    call = "cmd.cgi"
-    data = "cmd_typ=34&host=#{host}&service=#{service}&cmd_mod=2&sticky_ack=on&com_author=#{msg.envelope.user}&send_notification=on&com_data=#{encodeURIComponent(comment)}"
-    nagios_post msg, call, data, (res) ->
-      if res.match(/successfully submitted/)
-        msg.send "Your acknowledgement was received by nagios"
-      else 
-        msg.send "that didn't work.  Maybe a typo?"
+      when 'check'
+        if input.length < 1 
+          msg.send "Usage: nagios #{cmd} <host> [<service>]"
+        else
+           host = input[0]
+           service = input[1]
+           if service 
+              ct = 7
+              serv_ck = "&service=#{service}"
+              service = ":#{service}"
+           else
+              ct = 17
+              serv_ck = ""
+              service = ""
+           start_time = moment().format("YYYY-MM-DD HH:mm:ss")
+           call = "cmd.cgi"
+           data = "cmd_typ=#{ct}&cmd_mod=2&host=#{host}#{serv_ck}&force_check=on&start_time=#{encodeURIComponent(start_time)}"
+           nagios_post msg, call, data, (res) ->
+             if res.match(/successfully submitted/)
+               msg.send "Scheduled to recheck #{host}#{service} at #{start_time}"
+             else 
+               msg.send "that didn't work.  Maybe a typo?"
 
-  robot.respond /nagios downtime (.*):(.*) (\d+)/i, (msg) ->
-    host = msg.match[1]
-    service = msg.match[2]
-    minutes = msg.match[3] || 30
-    call = "cmd.cgi"
-    data = "cmd_typ=9&cmd_mod=2&&host=#{host}&service=#{service}&not_dly=#{minutes}"
-    nagios_post msg, call, data, (res) ->
-      if res.match(/successfully submitted/)
-        msg.send "Muting #{host}:#{service} for #{minutes}m"
-      else 
-        msg.send "that didn't work.  Maybe a typo?"
+      when 'enable', 'disable'
+        if input.length < 1 
+          msg.send "Usage: nagios #{cmd} <host> [<service>]"
+        else
+           host = input[0]
+           service = input[1]
+           if service 
+              serv_ck = "&service=#{service}"
+              service = ":#{service}"
+              switch cmd 
+                when 'enable'  then ct = 22
+                when 'disable' then ct = 23
+           else
+              switch cmd 
+                when 'enable'  then ct = 24
+                when 'disable' then ct = 25
+              serv_ck = ""
+              service = ""
+           call = "cmd.cgi"
+           data = "cmd_typ=#{ct}&cmd_mod=2&host=#{host}#{serv_ck}"
+           console.log data
+           nagios_post msg, call, data, (res) ->
+             if res.match(/successfully submitted/)
+               msg.send "Notifications #{cmd}d for #{host}#{service}"
+             else 
+               msg.send "that didn't work.  Maybe a typo?"
+      
+      when 'downtime'
+        if input.length < 2 
+          msg.send "Usage: nagios #{cmd} <host> <service> [<minutes> default: 30]"
+        else  
+          host = input[0]
+          service = input[2]
+          minutes = input[3] || 30
+          call = "cmd.cgi"
+          data = "cmd_typ=9&cmd_mod=2&&host=#{host}&service=#{service}&not_dly=#{minutes}"
+          nagios_post msg, call, data, (res) ->
+            if res.match(/successfully submitted/)
+              msg.send "Downtimed #{host}:#{service} for #{minutes}m"
+            else 
+              msg.send "that didn't work.  Maybe a typo?"
 
-  robot.respond /nagios check ([a-zA-z0-9-_]+)$/i, (msg) ->
-    host = msg.match[1]
-    call = "cmd.cgi"
-    start_time = moment().format("YYYY-MM-DD HH:mm:ss")
-    data = "cmd_typ=17&cmd_mod=2&host=#{host}&force_check=on&start_time=#{encodeURIComponent(start_time)}"
-    nagios_post msg, call, data, (res) ->
-      console.log res
-      if res.match(/successfully submitted/)
-        msg.send "Scheduled to recheck #{host} at #{start_time}"
-      else 
-        msg.send "that didn't work.  Maybe a typo in the hostname?"
+      when 'notifications', 'notify'
+        if input.length < 1 
+          msg.send "Usage: nagios #{cmd} <on|off>"
+        else  
+          mode = input[0]
+        switch mode
+          when 'on'  
+            state = 'enabled'
+            ct = 12
+          when 'off'  
+            state = 'disabled'
+            ct = 11
+        call = "cmd.cgi"
+        data = "cmd_typ=#{ct}&cmd_mod=2"
+        nagios_post msg, call, data, (res) ->
+          if res.match(/successfully submitted/)
+            msg.send "Ok, global notifications #{state}"
 
-  robot.respond /nagios check (.*):(.*)/i, (msg) ->
-    host = msg.match[1]
-    service = msg.match[2]
-    call = "cmd.cgi"
-    start_time = moment().format("YYYY-MM-DD HH:mm:ss")
-    data = "cmd_typ=7&cmd_mod=2&host=#{host}&service=#{service}&force_check=on&start_time=#{encodeURIComponent(start_time)}"
-    nagios_post msg, call, data, (res) ->
-      if res.match(/successfully submitted/)
-        msg.send "Scheduled to recheck #{host}:#{service} at #{readable}"
-      else 
-        msg.send "that didn't work.  Maybe a typo in the service?"
-
-  robot.respond /nagios enable ([a-zA-z0-9-_]+)$/i, (msg) ->
-    host = msg.match[1]
-    call = "cmd.cgi"
-    data = "cmd_typ=24&cmd_mod=2&host=#{host}"
-    nagios_post msg, call, data, (res) ->
-      console.log res
-      if res.match(/successfully submitted/)
-        msg.send "Enabled notifications on #{host}"
-      else 
-        msg.send "that didn't work.  Maybe a typo in the hostname?"
-
-  robot.respond /nagios enable (.*):(.*)/i, (msg) ->
-    host = msg.match[1]
-    service = msg.match[2]
-    call = "cmd.cgi"
-    data = "cmd_typ=22&cmd_mod=2&host=#{host}&service=#{service}"
-    nagios_post msg, call, data, (res) ->
-      if res.match(/successfully submitted/)
-        msg.send "Enabled notifications for #{host}:#{service}"
-      else 
-        msg.send "that didn't work.  Maybe a typo in the service?"
-
-  robot.respond /nagios disable ([a-zA-z0-9-_]+)$/i, (msg) ->
-    host = msg.match[1]
-    call = "cmd.cgi"
-    data = "cmd_typ=25&cmd_mod=2&host=#{host}"
-    nagios_post msg, call, data, (res) ->
-      console.log res
-      if res.match(/successfully submitted/)
-        msg.send "Disabled notifications on #{host}"
-      else 
-        msg.send "that didn't work.  Maybe a typo in the hostname?"
-
-  robot.respond /nagios disable (.*):(.*)/i, (msg) ->
-    host = msg.match[1]
-    service = msg.match[2]
-    call = "cmd.cgi"
-    data = "cmd_typ=23&cmd_mod=2&host=#{host}&service=#{service}"
-    nagios_post msg, call, data, (res) ->
-      if res.match(/successfully submitted/)
-        msg.send "Disabled notifications for #{host}:#{service}"
-      else 
-        msg.send "that didn't work.  Maybe a typo in the service?"
-
-  robot.respond /nagios (notifications_off|stfu|shut up)/i, (msg) ->
-    call = "cmd.cgi"
-    data = "cmd_typ=11&cmd_mod=2"
-    nagios_post msg, call, data, (res) ->
-      if res.match(/successfully submitted/)
-        msg.send "Ok, global notifications disabled"
-
-  robot.respond /nagios notifications_on/i, (msg) ->
-    call = "cmd.cgi"
-    data = "cmd_typ=12&cmd_mod=2"
-    nagios_post msg, call, data, (res) ->
-      if res.match(/successfully submitted/)
-        msg.send "Ok, global notifications are enabled"
 
 nagios_post = (msg, call, data, cb) ->
   msg.http("#{nagios_url}/#{call}")
