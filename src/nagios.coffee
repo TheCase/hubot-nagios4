@@ -65,23 +65,6 @@ module.exports = (robot) ->
      
     switch cmd 
 
-      when 'host'
-        if input.length < 1 
-          msg.send "Usage: nagios #{cmd} <host> [<service>]"
-        else
-          host = input[0]
-          service = input[1] || ".*"
-          call = "status.cgi"
-          data = "host=#{host}&limit=0"
-          info = "#{safe_url}/#{call}#{data}"
-          nagios_post msg, call, data, (html) ->
-            if html.match(/of 0 Matching Services/)
-              msg.send "I didn't find any services for a host named '#{host}'"
-            else
-              host_service_parse html, service, (res) -> 
-                res = "nagios status for host '#{host}': #{info}\n" + res
-                msg.send res
-
       when 'hosts'
         if input.length < 1 || !input[0].match(/(up|down|unreachable)/i)
           msg.send "Usage: nagios #{cmd} <up|down|unreachable>"
@@ -97,6 +80,43 @@ module.exports = (robot) ->
                   msg.send res
                 else
                   msg.send "I did not find any hosts in '#{status}' state"
+
+      when 'host'
+        if input.length < 1 
+          msg.send "Usage: nagios #{cmd} <host> [<service>]"
+        else
+          host = input[0]
+          service = input[1] || ".*"
+          call = "status.cgi"
+          data = "host=#{host}&limit=0"
+          info = "#{safe_url}/#{call}#{data}"
+          nagios_post msg, call, data, (html) ->
+            if html.match(/of 0 Matching Services/)
+              msg.send "I didn't find any services for a host named '#{host}'"
+            else
+              host_service_parse html, 'host', service, (res) -> 
+                res = "nagios status for host '#{host}': #{info}\n" + res
+                msg.send res
+
+      when 'services'
+        if input.length < 1 || !input[0].match(/(critical|warning|unknown)/i)
+          msg.send "Usage: nagios #{cmd} <critical|warning|unknown>"
+        else
+          status = (input[0] || ".*").toUpperCase()
+          switch status
+            when 'CRITICAL' then sts = '16'
+            when 'WARNING'  then sts = '4'
+            when 'UNKNOWN'  then sts = '8'
+          call = "status.cgi"
+          data = "host=all&style=detail&servicestatustypes=#{sts}&limit=0"
+          info = "#{safe_url}/#{call}#{data}"
+          nagios_post msg, call, data, (html) ->
+              host_service_parse html, 'services', '.*', (res) -> 
+                if res.length > 0
+                  res = "#{status} services: #{info}\n" + res
+                  msg.send res
+                else
+                  msg.send "I did not find any services in '#{status}' state"
 
       when 'ack'
         if input.length < 1 
@@ -162,7 +182,6 @@ module.exports = (robot) ->
               service = ""
            call = "cmd.cgi"
            data = "cmd_typ=#{ct}&cmd_mod=2&host=#{host}#{serv_ck}"
-           console.log data
            nagios_post msg, call, data, (res) ->
              if res.match(/successfully submitted/)
                msg.send "Notifications #{cmd}d for #{host}#{service}"
@@ -206,7 +225,7 @@ module.exports = (robot) ->
         msg.send """
 nagios help:
 nagios hosts <up|down|unreachable> - view problem hosts
-nagios services [<critical|warning|unknown>] - view unhandled service issues
+nagios services [<critical|warning|unknown>] - view non-OK service issues
 nagios host <host> [<service>]- view host service status
 nagios check <host> [<service>] - force check of all services on host (service optional)
 nagios ack <host> [<service>] - acknowledge host or host service
@@ -223,7 +242,7 @@ nagios_post = (msg, call, post, cb) ->
     .post(post) (err, res, body) ->
       cb body
 
-host_service_parse = (html, match, cb) ->
+host_service_parse = (html, type, match, cb) ->
   entities = new Entities()
   handler = new HtmlParser.DefaultHandler()
   parser  = new HtmlParser.Parser handler
@@ -231,12 +250,17 @@ host_service_parse = (html, match, cb) ->
 
   results = (Select handler.dom, "td")
   output = ""
+  host = ""
   for item in results
     if item['attribs'] && item['attribs']['class'] && item['attribs']['class'].match(/^status/)
       for child in item['children']
+        if type == 'services' && child['attribs'] && 
+           child['attribs']['href']  &&
+           child['attribs']['href'].match(/1&host=/)
+          host = "*#{child['children'][0]['raw']}*"
         if child['raw'].match(/&service=/)
           service = child['children'][0]['raw']
-          buffer  = "`#{service}` "
+          buffer = "#{host} `#{service}` "
         if child['raw'].match(/^(OK|WARNING|CRITICAL|UNKNOWN)$/)
           buffer += "*#{child['raw']}* "
           mark = 0
