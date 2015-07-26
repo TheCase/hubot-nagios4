@@ -49,7 +49,7 @@ module.exports = (robot) ->
 nagios hosts <down|unreachable> - view problem hosts
 nagios services <critical|warning|unknown> - view unhandled service issues
 nagios host <host> - view host status
-nagios ack <host>:<service> <description> - acknowledge alert
+nagios ack <host>:<service> <comment> - acknowledge alert
 nagios downtime <host>:<service> <minutes> - delay the next service notification
 nagios check <host>(:<service>) - force check of all services on host (service optional)
 nagios enable <host>(:<service>) - enable notifications on host (or specific service optional)
@@ -73,9 +73,9 @@ nagios notifications_on - enable global notifications
   robot.respond /nagios ack (.*):(.*) (.*)/i, (msg) ->
     host = msg.match[1]
     service = msg.match[2]
-    message = msg.match[3] || ""
+    comment = msg.match[3] || ""
     call = "cmd.cgi"
-    data = "cmd_typ=34&host=#{host}&service=#{service}&cmd_mod=2&sticky_ack=on&com_author=#{msg.envelope.user}&send_notification=on&com_data=#{encodeURIComponent(message)}"
+    data = "cmd_typ=34&host=#{host}&service=#{service}&cmd_mod=2&sticky_ack=on&com_author=#{msg.envelope.user}&send_notification=on&com_data=#{encodeURIComponent(comment)}"
     nagios_post msg, call, data, (res) ->
       if res.match(/successfully submitted/)
         msg.send "Your acknowledgement was received by nagios"
