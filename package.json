@@ -1,6 +1,6 @@
 {
     "name": "hubot-nagios4",
-    "version": "1.0.2",
+    "version": "1.0.3",
 
     "description": "hubot script that interacts with nagios4",
     "keywords": [ "hubot", "hubot-scripts", "nagios" ],
