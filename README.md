@@ -21,7 +21,7 @@ Then add **hubot-nagios4** to your `external-scripts.json`:
 Commands
 --------
 
-`hubot nagios4 help` - Get help text  
+`hubot nagios help` - Get help text  
 
 License
 -------
