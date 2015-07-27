@@ -29,11 +29,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
 # construct various URLs
 nagios_url  = process.env.HUBOT_NAGIOS_URL
 nagios_auth = process.env.HUBOT_NAGIOS_AUTH
-url_method  = nagios_url.match(/(https|http):\/\//)[1]
-pattern     = "#{url_method}://"
-base_url    = nagios_url.replace(pattern,"")
-nagios_url  = "#{url_method}://#{nagios_auth}@#{base_url}"
-safe_url    = "#{url_method}://#{base_url}"
+auth = 'Basic ' + new Buffer(nagios_auth).toString('base64');
 
 module.exports = (robot) ->
 
@@ -65,6 +61,9 @@ module.exports = (robot) ->
      
     switch cmd 
 
+      when 'url'
+        msg.send nagios_url.replace(/cgi-bin/, '')
+
       when 'hosts'
         if input.length < 1 || !input[0].match(/(up|down|unreachable)/i)
           msg.send "Usage: nagios #{cmd} <up|down|unreachable>"
@@ -72,8 +71,8 @@ module.exports = (robot) ->
           status = (input[0] || ".*").toUpperCase()
           call = "status.cgi"
           data = "hostgroup=all&style=hostdetail&limit=0"
-          info = "#{safe_url}/#{call}#{data}"
-          nagios_post msg, call, data, (html) ->
+          info = "#{nagios_url}/#{call}?#{data}"
+          nagios_post msg, auth, call, data, (html) ->
               host_parse html, status, (res) -> 
                 if res.length > 0
                   res = "#{status} hosts: #{info}\n" + res
@@ -89,8 +88,10 @@ module.exports = (robot) ->
           service = input[1] || ".*"
           call = "status.cgi"
           data = "host=#{host}&limit=0"
-          info = "#{safe_url}/#{call}#{data}"
-          nagios_post msg, call, data, (html) ->
+          info = "#{nagios_url}/#{call}?#{data}"
+          console.log nagios_url
+          console.log data
+          nagios_post msg, auth, call, data, (html) ->
             if html.match(/of 0 Matching Services/)
               msg.send "I didn't find any services for a host named '#{host}'"
             else
@@ -109,8 +110,8 @@ module.exports = (robot) ->
             when 'UNKNOWN'  then sts = '8'
           call = "status.cgi"
           data = "host=all&style=detail&servicestatustypes=#{sts}&limit=0"
-          info = "#{safe_url}/#{call}#{data}"
-          nagios_post msg, call, data, (html) ->
+          info = "#{nagios_url}/#{call}?#{data}"
+          nagios_post msg, auth, call, data, (html) ->
               host_service_parse html, 'services', '.*', (res) -> 
                 if res.length > 0
                   res = "#{status} services: #{info}\n" + res
@@ -133,7 +134,7 @@ module.exports = (robot) ->
            comment = "hubot initiated ack for #{hubot_user}"
            call = "cmd.cgi"
            data = "cmd_typ=#{ct}&host=#{host}#{service}&cmd_mod=2&sticky_ack=on&com_author=#{encodeURIComponent(hubot_user)}&send_notification=on&com_data=#{encodeURIComponent(comment)}"
-           nagios_post msg, call, data, (res) ->
+           nagios_post msg, auth, call, data, (res) ->
              if res.match(/successfully submitted/)
                msg.send "Your acknowledgement was received by nagios"
              else 
@@ -156,7 +157,7 @@ module.exports = (robot) ->
            start_time = moment().format("YYYY-MM-DD HH:mm:ss")
            call = "cmd.cgi"
            data = "cmd_typ=#{ct}&cmd_mod=2&host=#{host}#{serv_ck}&force_check=on&start_time=#{encodeURIComponent(start_time)}"
-           nagios_post msg, call, data, (res) ->
+           nagios_post msg, auth, call, data, (res) ->
              if res.match(/successfully submitted/)
                msg.send "Scheduled to recheck #{host}#{service} at #{start_time}"
              else 
@@ -182,7 +183,7 @@ module.exports = (robot) ->
               service = ""
            call = "cmd.cgi"
            data = "cmd_typ=#{ct}&cmd_mod=2&host=#{host}#{serv_ck}"
-           nagios_post msg, call, data, (res) ->
+           nagios_post msg, auth, call, data, (res) ->
              if res.match(/successfully submitted/)
                msg.send "Notifications #{cmd}d for #{host}#{service}"
              else 
@@ -197,7 +198,7 @@ module.exports = (robot) ->
           minutes = input[3] || 30
           call = "cmd.cgi"
           data = "cmd_typ=9&cmd_mod=2&&host=#{host}&service=#{service}&not_dly=#{minutes}"
-          nagios_post msg, call, data, (res) ->
+          nagios_post msg, auth, call, data, (res) ->
             if res.match(/successfully submitted/)
               msg.send "Downtimed #{host}:#{service} for #{minutes}m"
             else 
@@ -217,13 +218,14 @@ module.exports = (robot) ->
             ct = 11
         call = "cmd.cgi"
         data = "cmd_typ=#{ct}&cmd_mod=2"
-        nagios_post msg, call, data, (res) ->
+        nagios_post msg, auth, call, data, (res) ->
           if res.match(/successfully submitted/)
             msg.send "Ok, global notifications #{state}"
 
       when 'help'
         msg.send """
 nagios help:
+nagios url - view nagios web url
 nagios hosts <up|down|unreachable> - view problem hosts
 nagios services [<critical|warning|unknown>] - view non-OK service issues
 nagios host <host> [<service>]- view host service status
@@ -235,9 +237,10 @@ nagios downtime <host> <service> [<minutes>] - delay the next service notificati
 nagios notifications <on|off> - disables global notifications
 """
 
-nagios_post = (msg, call, post, cb) ->
+nagios_post = (msg, auth, call, post, cb) ->
   msg.http("#{nagios_url}/#{call}")
     .header('accept', '*/*')
+    .header('Authorization', auth)
     .header('User-Agent', "Hubot/#{@version}")
     .post(post) (err, res, body) ->
       cb body
