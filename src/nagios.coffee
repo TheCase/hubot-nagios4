@@ -50,7 +50,7 @@ module.exports = (robot) ->
     res.end()
 
   robot.respond /nagios(NULL|(.*))/i, (msg) ->
-    hubot_user = msg['message']['user']['email_address']
+    hubot_user = msg['message']['user']['name']
     words = msg.match[1]
     input = words.split(' ');
     if words.length < 1
